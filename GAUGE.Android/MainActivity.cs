@@ -1,4 +1,5 @@
 using Android.App;
+using Android.Content;
 using Android.Content.PM;
 using Android.Graphics;
 using Android.OS;
@@ -7,6 +8,9 @@ using Android.Widget;
 using Avalonia;
 using Avalonia.Android;
 using Com.Airbnb.Lottie;
+using GAUGE.Services;               // Для TimerServiceBridge
+
+     // Для TimerForegroundService у новій папці
 
 namespace GAUGE.Android;
 
@@ -22,9 +26,37 @@ public class MainActivity : AvaloniaMainActivity<App>
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
+        // Запит дозволу на сповіщення (Android 13+)
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.Tiramisu)
+        {
+            if (CheckSelfPermission(global::Android.Manifest.Permission.PostNotifications) != Permission.Granted)
+            {
+                RequestPermissions(new[] { global::Android.Manifest.Permission.PostNotifications }, 101);
+            }
+        }
+
         RequestWindowFeature(WindowFeatures.NoTitle);
         SupportActionBar?.Hide();
         base.OnCreate(savedInstanceState);
+
+        // Підписка на оновлення сповіщення у шторці з ViewModel
+        TimerServiceBridge.OnNotificationUpdateRequested += HandleNotificationUpdate;
+    }
+
+    private void HandleNotificationUpdate(string timeText, bool isRunning)
+    {
+        var intent = new Intent(this, typeof(GAUGE.Android.Services.TimerForegroundService));
+        intent.PutExtra("TIME_TEXT", timeText);
+        intent.PutExtra("IS_RUNNING", isRunning);
+
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
+        {
+            StartForegroundService(intent);
+        }
+        else
+        {
+            StartService(intent);
+        }
     }
 
     public override void OnAttachedToWindow()
