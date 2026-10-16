@@ -16,6 +16,9 @@ using System.Collections.Generic;
 
 namespace GAUGE.ViewModels;
 
+
+
+
 public class WorkoutHistoryModel
 {
     public string Title { get; set; } = string.Empty;
@@ -72,6 +75,38 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _newExerciseCategory = "Верх";
 
     [ObservableProperty] private int _currentReps = 0;
+[ObservableProperty] private bool _isCurrentTimeBased = false;
+
+public string CurrentRepsUnit => IsCurrentTimeBased ? "сек" : "шт";
+
+public string CurrentTimeString
+{
+    get
+    {
+        var ts = TimeSpan.FromSeconds(CurrentReps);
+        return string.Format("{0:D2}:{1:D2}", (int)ts.TotalMinutes, ts.Seconds);
+    }
+}
+
+[RelayCommand]
+public void AdjustTimeReps(string deltaStr)
+{
+    if (int.TryParse(deltaStr, out int deltaSeconds))
+    {
+        int newVal = CurrentReps + deltaSeconds;
+        CurrentReps = Math.Max(0, newVal);
+        OnPropertyChanged(nameof(CurrentTimeString));
+    }
+}
+
+[RelayCommand]
+public void SwitchToRepsMode()
+{
+    IsCurrentTimeBased = false;
+    CurrentReps = Math.Min(CurrentReps, 60);
+    OnPropertyChanged(nameof(CurrentRepsUnit));
+}
+
     [ObservableProperty] private int _currentRest = 60;
     [ObservableProperty] private string _currentNotes = string.Empty;
 
@@ -86,10 +121,12 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _currentDetailsFilePath = string.Empty;
     
     // Таймер
-    private DispatcherTimer _timer;
-    private int _elapsedSeconds = 0;
-    [ObservableProperty] private string _timerDisplay = "00:00";
+ // --- ТОЧНИЙ ТАЙМЕР (НЕ ЗБИВАЄТЬСЯ ПРИ ЗГОРТАННІ) ---
+    private readonly DispatcherTimer _workoutTimer = new();
+    private DateTime _timerStartTime;
+    private TimeSpan _timerAccumulated = TimeSpan.Zero;
     [ObservableProperty] private bool _isTimerRunning = false;
+    [ObservableProperty] private string _timerDisplay = "00:00";
     [ObservableProperty] private string _playPauseIcon = "▶";
 
     private readonly string _dataDirectory = Path.Combine(
@@ -104,20 +141,24 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public ObservableCollection<ExportItem> AvailableWorkouts { get; } = new();
     [ObservableProperty] private bool _isExportDialogVisible = false;
-
+private void StartRestTimer()
+{
+    // Логіка старту таймера відпочинку (наприклад, скидання поточного та старт зворотного відліку/відпочинку)
+    // Після зміни стану обов'язково оновлюємо шторку:
+    GAUGE.Services.TimerServiceBridge.RequestNotificationUpdate(TimerDisplay, IsTimerRunning);
+}
     public MainWindowViewModel()
     {
         _autosaveFilePath = Path.Combine(_dataDirectory, "autosave_workout.json");
         _filePath = Path.Combine(_dataDirectory, "exercises_list.txt");
         _activityLogFilePath = Path.Combine(_dataDirectory, "activity_log.json");
 
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _timer.Tick += (s, e) =>
-        {
-            _elapsedSeconds++;
-            TimerDisplay = TimeSpan.FromSeconds(_elapsedSeconds).ToString(@"mm\:ss");
-        };
-
+       _workoutTimer.Interval = TimeSpan.FromMilliseconds(500);
+        _workoutTimer.Tick += OnWorkoutTimerTick;
+GAUGE.Services.TimerServiceBridge.OnToggleRequested += () => ToggleTimer();
+GAUGE.Services.TimerServiceBridge.OnSaveRepsRequested += () => SaveTimerToReps();
+GAUGE.Services.TimerServiceBridge.OnResetRequested += () => ResetTimer();
+TimerServiceBridge.OnRestRequested += StartRestTimer;
         LoadExercisesFromFile();
         LoadHistory();
         BuildCalendar();
@@ -334,7 +375,7 @@ public partial class MainWindowViewModel : ViewModelBase
         SaveAutosave();
     }
 
-    private void AddExerciseToSet(WorkoutSetModel set)
+private void AddExerciseToSet(WorkoutSetModel set)
     {
         set.Exercises.Add(new ExerciseModel
         {
@@ -342,43 +383,105 @@ public partial class MainWindowViewModel : ViewModelBase
             Reps = CurrentReps,
             Notes = CurrentNotes,
             RestSeconds = CurrentRest,
-            Category = SelectedExerciseItem?.Category ?? "Верх"
+            Category = SelectedExerciseItem?.Category ?? "Верх",
+            IsTimeBased = IsCurrentTimeBased
         });
+
+        // Скидаємо стан після додавання
         CurrentNotes = string.Empty;
+        IsCurrentTimeBased = false;
+        OnPropertyChanged(nameof(CurrentRepsUnit));
     }
 
-    [RelayCommand]
+   private void OnWorkoutTimerTick(object? sender, EventArgs e)
+    {
+        if (IsTimerRunning)
+        {
+            var totalElapsed = _timerAccumulated + (DateTime.UtcNow - _timerStartTime);
+            TimerDisplay = $"{(int)totalElapsed.TotalMinutes:D2}:{totalElapsed.Seconds:D2}";
+GAUGE.Services.TimerServiceBridge.RequestNotificationUpdate(TimerDisplay, IsTimerRunning);
+
+        }
+    }
+
+[RelayCommand]
     public void ToggleTimer()
     {
         if (IsTimerRunning)
         {
-            _timer.Stop();
+            _timerAccumulated += DateTime.UtcNow - _timerStartTime;
+            IsTimerRunning = false;
+            _workoutTimer.Stop();
             PlayPauseIcon = "▶";
+           
+        
         }
         else
         {
-            _timer.Start();
-            PlayPauseIcon = "॥";
+            _timerStartTime = DateTime.UtcNow;
+            IsTimerRunning = true;
+            _workoutTimer.Start();
+            PlayPauseIcon = "❚❚";
+          
+
         }
-        IsTimerRunning = !IsTimerRunning;
+
+        // Оновлюємо стан сповіщення у шторці Android при кожному кліку
+
+        GAUGE.Services.TimerServiceBridge.RequestNotificationUpdate(TimerDisplay, IsTimerRunning);
     }
 
     [RelayCommand]
-    public void SaveTimerToLastExercise()
+    public void ResetTimer()
     {
-        _timer.Stop();
         IsTimerRunning = false;
-        PlayPauseIcon = "▶";
-
-        var currentSet = WorkoutSets.LastOrDefault(s => !s.IsClosed);
-        var lastExercise = currentSet?.Exercises.LastOrDefault();
-        if (lastExercise != null)
-        {
-            lastExercise.RestSeconds = _elapsedSeconds;
-        }
-
-        _elapsedSeconds = 0;
+        _workoutTimer.Stop();
+        _timerAccumulated = TimeSpan.Zero;
         TimerDisplay = "00:00";
+        PlayPauseIcon = "▶";
+    }
+
+    // Запис у відпочинок (замість старої SaveTimerToLastExercise)
+   [RelayCommand]
+    public void SaveTimerToRest()
+    {
+        var totalSeconds = GetCurrentTimerSeconds();
+        if (totalSeconds > 0)
+        {
+            var currentSet = WorkoutSets.LastOrDefault(s => !s.IsClosed);
+            var lastExercise = currentSet?.Exercises.LastOrDefault();
+            if (lastExercise != null)
+            {
+                lastExercise.RestSeconds = totalSeconds;
+                SaveAutosave();
+            }
+            ResetTimer();
+        }
+    }
+
+    // Запис у повторення (для планки, вису тощо)
+ [RelayCommand]
+public void SaveTimerToReps()
+{
+    var totalSeconds = GetCurrentTimerSeconds();
+    if (totalSeconds > 0)
+    {
+        CurrentReps = totalSeconds;
+        IsCurrentTimeBased = true;
+        OnPropertyChanged(nameof(CurrentRepsUnit));
+        OnPropertyChanged(nameof(CurrentTimeString));
+        ResetTimer();
+    }
+}
+
+    private int GetCurrentTimerSeconds()
+    {
+        var total = _timerAccumulated;
+        if (IsTimerRunning)
+        {
+            total += DateTime.UtcNow - _timerStartTime;
+        }
+        return (int)total.TotalSeconds;
     }
 
     [RelayCommand]
@@ -505,7 +608,7 @@ private HashSet<string> LoadActivityDates()
 
             DeleteAutosave();
             WorkoutSets.Clear();
-            _elapsedSeconds = 0;
+            ResetTimer();
             TimerDisplay = "00:00";
             IsFinishDialogVisible = false;
             IsWorkoutActive = false;
@@ -781,4 +884,4 @@ public void SetNewExerciseCategory(string category)
 {
     NewExerciseCategory = category;
 }
-}
+} // Оце найостанніша закриваюча дужка класу/простору імен
