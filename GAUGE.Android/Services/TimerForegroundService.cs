@@ -83,7 +83,7 @@ public class TimerForegroundService : Service
             .SetSmallIcon(global::Android.Resource.Drawable.IcMediaPlay)
             .SetOngoing(true)
             .SetOnlyAlertOnce(true)
-            .AddAction(0, isRunning ? " ⏸ Пауза" : " ▶ Старт", togglePendingIntent)
+            .AddAction(0, isRunning ? " || Пауза" : " ▶ Старт", togglePendingIntent)
             .AddAction(0, " В відпочинок", restPendingIntent)
             .AddAction(0, " ⛌ Скинути", resetPendingIntent);
 

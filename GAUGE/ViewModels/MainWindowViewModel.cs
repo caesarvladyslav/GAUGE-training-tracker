@@ -158,7 +158,7 @@ private void StartRestTimer()
 GAUGE.Services.TimerServiceBridge.OnToggleRequested += () => ToggleTimer();
 GAUGE.Services.TimerServiceBridge.OnSaveRepsRequested += () => SaveTimerToReps();
 GAUGE.Services.TimerServiceBridge.OnResetRequested += () => ResetTimer();
-TimerServiceBridge.OnRestRequested += StartRestTimer;
+GAUGE.Services.TimerServiceBridge.OnRestRequested += () => SaveTimerToRest();
         LoadExercisesFromFile();
         LoadHistory();
         BuildCalendar();
