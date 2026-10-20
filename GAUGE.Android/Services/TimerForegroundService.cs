@@ -106,4 +106,13 @@ public class TimerForegroundService : Service
             manager?.CreateNotificationChannel(channel);
         }
     }
+
+    public override void OnTaskRemoved(Intent? rootIntent)
+{
+    base.OnTaskRemoved(rootIntent);
+    
+    // Зупиняємо таймер та прибираємо нотифікацію
+    StopForeground(StopForegroundFlags.Remove);
+    StopSelf();
+}
 }

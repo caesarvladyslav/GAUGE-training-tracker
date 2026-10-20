@@ -8,7 +8,8 @@ using Android.Widget;
 using Avalonia;
 using Avalonia.Android;
 using Com.Airbnb.Lottie;
-using GAUGE.Services;               // Для TimerServiceBridge
+using GAUGE.Services;     
+using GAUGE.Android.Services;          // Для TimerServiceBridge
 
      // Для TimerForegroundService у новій папці
 
@@ -140,6 +141,12 @@ public class MainActivity : AvaloniaMainActivity<App>
     {
         return base.CustomizeAppBuilder(builder);
     }
+
+    protected override void OnDestroy()
+{
+    base.OnDestroy();
+    StopService(new Intent(this, typeof(TimerForegroundService)));
+}
 }
 
 public class SafeImageDelegate : Java.Lang.Object, IImageAssetDelegate
@@ -160,3 +167,4 @@ public class SplashEndListener : Java.Lang.Object, global::Android.Animation.Ani
     public void OnAnimationRepeat(global::Android.Animation.Animator? animation) { }
     public void OnAnimationStart(global::Android.Animation.Animator? animation) { }
 }
+
